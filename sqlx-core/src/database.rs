@@ -12,7 +12,7 @@
 //! | [MariaDB] | 10.1+ | [`mysql`] |
 //! | [Microsoft SQL Server] | 2019 | [`mssql`] (Pending a full rewrite) |
 //! | [MySQL] | 5.6, 5.7, 8.0 | [`mysql`] |
-//! | [PostgreSQL] | 9.5+ | [`postgres`] |
+//! | [PostgreSQL] | 13+ | [`postgres`] |
 //! | [SQLite] | 3.20.1+ | [`sqlite`] |
 //!
 //! [MariaDB]: https://mariadb.com/
@@ -101,7 +101,7 @@ pub trait Database: 'static + Sized + Send + Debug {
     type ArgumentBuffer<'q>;
 
     /// The concrete `Statement` implementation for this database.
-    type Statement<'q>: Statement<'q, Database = Self>;
+    type Statement: Statement<Database = Self>;
 
     /// The display name for this database driver.
     const NAME: &'static str;

@@ -3,13 +3,14 @@ use crate::error::Error;
 use crate::logger::QueryLogger;
 use crate::statement::{StatementHandle, VirtualStatement};
 use crate::{SqliteArguments, SqliteQueryResult, SqliteRow};
+use sqlx_core::sql_str::SqlSafeStr;
 use sqlx_core::Either;
 
 pub struct ExecuteIter<'a> {
     handle: &'a mut ConnectionHandle,
     statement: &'a mut VirtualStatement,
-    logger: QueryLogger<'a>,
-    args: Option<SqliteArguments<'a>>,
+    logger: QueryLogger,
+    args: Option<SqliteArguments>,
 
     /// since a `VirtualStatement` can encompass multiple actual statements,
     /// this keeps track of the number of arguments so far
@@ -18,14 +19,15 @@ pub struct ExecuteIter<'a> {
     goto_next: bool,
 }
 
-pub(crate) fn iter<'a>(
-    conn: &'a mut ConnectionState,
-    query: &'a str,
-    args: Option<SqliteArguments<'a>>,
+pub(crate) fn iter(
+    conn: &mut ConnectionState,
+    query: impl SqlSafeStr,
+    args: Option<SqliteArguments>,
     persistent: bool,
-) -> Result<ExecuteIter<'a>, Error> {
+) -> Result<ExecuteIter<'_>, Error> {
+    let query = query.into_sql_str();
     // fetch the cached statement or allocate a new one
-    let statement = conn.statements.get(query, persistent)?;
+    let statement = conn.statements.get(query.as_str(), persistent)?;
 
     let logger = QueryLogger::new(query, conn.log_settings.clone());
 
@@ -41,7 +43,7 @@ pub(crate) fn iter<'a>(
 
 fn bind(
     statement: &mut StatementHandle,
-    arguments: &Option<SqliteArguments<'_>>,
+    arguments: &Option<SqliteArguments>,
     offset: usize,
 ) -> Result<usize, Error> {
     let mut n = 0;
@@ -54,7 +56,7 @@ fn bind(
 }
 
 impl ExecuteIter<'_> {
-    pub fn finish(&mut self) -> Result<(), Error> {
+    pub fn finish(self) -> Result<(), Error> {
         for res in self {
             let _ = res?;
         }

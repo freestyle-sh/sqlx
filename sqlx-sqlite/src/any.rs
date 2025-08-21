@@ -1,18 +1,18 @@
-use std::borrow::Cow;
-
 use crate::{
     Either, Sqlite, SqliteArgumentValue, SqliteArguments, SqliteColumn, SqliteConnectOptions,
     SqliteConnection, SqliteQueryResult, SqliteRow, SqliteTransactionManager, SqliteTypeInfo,
 };
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
-use futures_util::{StreamExt, TryFutureExt, TryStreamExt};
+use futures_util::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 
 use sqlx_core::any::{
     Any, AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
     AnyStatement, AnyTypeInfo, AnyTypeInfoKind, AnyValueKind,
 };
+use sqlx_core::sql_str::SqlStr;
 
+use crate::arguments::SqliteArgumentsBuffer;
 use crate::type_info::DataType;
 use sqlx_core::connection::{ConnectOptions, Connection};
 use sqlx_core::database::Database;
@@ -20,6 +20,7 @@ use sqlx_core::describe::Describe;
 use sqlx_core::executor::Executor;
 use sqlx_core::transaction::TransactionManager;
 use std::pin::pin;
+use std::sync::Arc;
 
 sqlx_core::declare_driver_with_optional_migrate!(DRIVER = Sqlite);
 
@@ -29,30 +30,27 @@ impl AnyConnectionBackend for SqliteConnection {
     }
 
     fn close(self: Box<Self>) -> BoxFuture<'static, sqlx_core::Result<()>> {
-        Connection::close(*self)
+        Connection::close(*self).boxed()
     }
 
     fn close_hard(self: Box<Self>) -> BoxFuture<'static, sqlx_core::Result<()>> {
-        Connection::close_hard(*self)
+        Connection::close_hard(*self).boxed()
     }
 
     fn ping(&mut self) -> BoxFuture<'_, sqlx_core::Result<()>> {
-        Connection::ping(self)
+        Connection::ping(self).boxed()
     }
 
-    fn begin(
-        &mut self,
-        statement: Option<Cow<'static, str>>,
-    ) -> BoxFuture<'_, sqlx_core::Result<()>> {
-        SqliteTransactionManager::begin(self, statement)
+    fn begin(&mut self, statement: Option<SqlStr>) -> BoxFuture<'_, sqlx_core::Result<()>> {
+        SqliteTransactionManager::begin(self, statement).boxed()
     }
 
     fn commit(&mut self) -> BoxFuture<'_, sqlx_core::Result<()>> {
-        SqliteTransactionManager::commit(self)
+        SqliteTransactionManager::commit(self).boxed()
     }
 
     fn rollback(&mut self) -> BoxFuture<'_, sqlx_core::Result<()>> {
-        SqliteTransactionManager::rollback(self)
+        SqliteTransactionManager::rollback(self).boxed()
     }
 
     fn start_rollback(&mut self) {
@@ -68,7 +66,7 @@ impl AnyConnectionBackend for SqliteConnection {
     }
 
     fn flush(&mut self) -> BoxFuture<'_, sqlx_core::Result<()>> {
-        Connection::flush(self)
+        Connection::flush(self).boxed()
     }
 
     fn should_flush(&self) -> bool {
@@ -84,7 +82,7 @@ impl AnyConnectionBackend for SqliteConnection {
 
     fn fetch_many<'q>(
         &'q mut self,
-        query: &'q str,
+        query: SqlStr,
         persistent: bool,
         arguments: Option<AnyArguments<'q>>,
     ) -> BoxStream<'q, sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
@@ -107,7 +105,7 @@ impl AnyConnectionBackend for SqliteConnection {
 
     fn fetch_optional<'q>(
         &'q mut self,
-        query: &'q str,
+        query: SqlStr,
         persistent: bool,
         arguments: Option<AnyArguments<'q>>,
     ) -> BoxFuture<'q, sqlx_core::Result<Option<AnyRow>>> {
@@ -132,16 +130,17 @@ impl AnyConnectionBackend for SqliteConnection {
 
     fn prepare_with<'c, 'q: 'c>(
         &'c mut self,
-        sql: &'q str,
+        sql: SqlStr,
         _parameters: &[AnyTypeInfo],
-    ) -> BoxFuture<'c, sqlx_core::Result<AnyStatement<'q>>> {
+    ) -> BoxFuture<'c, sqlx_core::Result<AnyStatement>> {
         Box::pin(async move {
             let statement = Executor::prepare_with(self, sql, &[]).await?;
-            AnyStatement::try_from_statement(sql, &statement, statement.column_names.clone())
+            let column_names = statement.column_names.clone();
+            AnyStatement::try_from_statement(statement, column_names)
         })
     }
 
-    fn describe<'q>(&'q mut self, sql: &'q str) -> BoxFuture<'q, sqlx_core::Result<Describe<Any>>> {
+    fn describe(&mut self, sql: SqlStr) -> BoxFuture<'_, sqlx_core::Result<Describe<Any>>> {
         Box::pin(async move { Executor::describe(self, sql).await?.try_into_any() })
     }
 }
@@ -201,31 +200,34 @@ impl<'a> TryFrom<&'a AnyConnectOptions> for SqliteConnectOptions {
     fn try_from(opts: &'a AnyConnectOptions) -> Result<Self, Self::Error> {
         let mut opts_out = SqliteConnectOptions::from_url(&opts.database_url)?;
         opts_out.log_settings = opts.log_settings.clone();
+
         Ok(opts_out)
     }
 }
 
-/// Instead of `AnyArguments::convert_into()`, we can do a direct mapping and preserve the lifetime.
-fn map_arguments(args: AnyArguments<'_>) -> SqliteArguments<'_> {
+// Infallible alternative to AnyArguments::convert_into()
+fn map_arguments(args: AnyArguments<'_>) -> SqliteArguments {
+    let values = args
+        .values
+        .0
+        .into_iter()
+        .map(|val| match val {
+            AnyValueKind::Null(_) => SqliteArgumentValue::Null,
+            AnyValueKind::Bool(b) => SqliteArgumentValue::Int(b as i32),
+            AnyValueKind::SmallInt(i) => SqliteArgumentValue::Int(i as i32),
+            AnyValueKind::Integer(i) => SqliteArgumentValue::Int(i),
+            AnyValueKind::BigInt(i) => SqliteArgumentValue::Int64(i),
+            AnyValueKind::Real(r) => SqliteArgumentValue::Double(r as f64),
+            AnyValueKind::Double(d) => SqliteArgumentValue::Double(d),
+            AnyValueKind::Text(t) => SqliteArgumentValue::Text(Arc::new(t.to_string())),
+            AnyValueKind::Blob(b) => SqliteArgumentValue::Blob(Arc::new(b.to_vec())),
+            // AnyValueKind is `#[non_exhaustive]` but we should have covered everything
+            _ => unreachable!("BUG: missing mapping for {val:?}"),
+        })
+        .collect();
+
     SqliteArguments {
-        values: args
-            .values
-            .0
-            .into_iter()
-            .map(|val| match val {
-                AnyValueKind::Null(_) => SqliteArgumentValue::Null,
-                AnyValueKind::Bool(b) => SqliteArgumentValue::Int(b as i32),
-                AnyValueKind::SmallInt(i) => SqliteArgumentValue::Int(i as i32),
-                AnyValueKind::Integer(i) => SqliteArgumentValue::Int(i),
-                AnyValueKind::BigInt(i) => SqliteArgumentValue::Int64(i),
-                AnyValueKind::Real(r) => SqliteArgumentValue::Double(r as f64),
-                AnyValueKind::Double(d) => SqliteArgumentValue::Double(d),
-                AnyValueKind::Text(t) => SqliteArgumentValue::Text(t),
-                AnyValueKind::Blob(b) => SqliteArgumentValue::Blob(b),
-                // AnyValueKind is `#[non_exhaustive]` but we should have covered everything
-                _ => unreachable!("BUG: missing mapping for {val:?}"),
-            })
-            .collect(),
+        values: SqliteArgumentsBuffer::new(values),
     }
 }
 

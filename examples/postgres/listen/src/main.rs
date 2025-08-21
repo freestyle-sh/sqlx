@@ -1,4 +1,4 @@
-use futures::TryStreamExt;
+use futures_util::TryStreamExt;
 use sqlx::postgres::PgListener;
 use sqlx::{Executor, PgPool};
 use std::pin::pin;
@@ -68,6 +68,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // The stream is holding one connection. It needs to be dropped to allow the connection to
+    // return to the pool, otherwise `pool.close()` would never return.
+    drop(stream);
+
     pool.close().await;
 
     Ok(())
@@ -98,9 +102,9 @@ from (
      ) notifies(chan, payload)
     "#,
     )
-    .bind(&COUNTER.fetch_add(1, Ordering::SeqCst))
-    .bind(&COUNTER.fetch_add(1, Ordering::SeqCst))
-    .bind(&COUNTER.fetch_add(1, Ordering::SeqCst))
+    .bind(COUNTER.fetch_add(1, Ordering::SeqCst))
+    .bind(COUNTER.fetch_add(1, Ordering::SeqCst))
+    .bind(COUNTER.fetch_add(1, Ordering::SeqCst))
     .execute(pool)
     .await;
 

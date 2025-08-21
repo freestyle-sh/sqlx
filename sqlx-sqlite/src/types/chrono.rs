@@ -7,7 +7,7 @@ use crate::{
     error::BoxDynError,
     type_info::DataType,
     types::Type,
-    Sqlite, SqliteArgumentValue, SqliteTypeInfo, SqliteValueRef,
+    Sqlite, SqliteArgumentsBuffer, SqliteTypeInfo, SqliteValueRef,
 };
 use chrono::FixedOffset;
 use chrono::{
@@ -65,25 +65,25 @@ impl<Tz: TimeZone> Encode<'_, Sqlite> for DateTime<Tz>
 where
     Tz::Offset: Display,
 {
-    fn encode_by_ref(&self, buf: &mut Vec<SqliteArgumentValue<'_>>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         Encode::<Sqlite>::encode(self.to_rfc3339_opts(SecondsFormat::AutoSi, false), buf)
     }
 }
 
 impl Encode<'_, Sqlite> for NaiveDateTime {
-    fn encode_by_ref(&self, buf: &mut Vec<SqliteArgumentValue<'_>>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         Encode::<Sqlite>::encode(self.format("%F %T%.f").to_string(), buf)
     }
 }
 
 impl Encode<'_, Sqlite> for NaiveDate {
-    fn encode_by_ref(&self, buf: &mut Vec<SqliteArgumentValue<'_>>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         Encode::<Sqlite>::encode(self.format("%F").to_string(), buf)
     }
 }
 
 impl Encode<'_, Sqlite> for NaiveTime {
-    fn encode_by_ref(&self, buf: &mut Vec<SqliteArgumentValue<'_>>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         Encode::<Sqlite>::encode(self.format("%T%.f").to_string(), buf)
     }
 }
@@ -108,9 +108,9 @@ impl<'r> Decode<'r, Sqlite> for DateTime<FixedOffset> {
 
 fn decode_datetime(value: SqliteValueRef<'_>) -> Result<DateTime<FixedOffset>, BoxDynError> {
     let dt = match value.type_info().0 {
-        DataType::Text => decode_datetime_from_text(value.text()?),
-        DataType::Int4 | DataType::Integer => decode_datetime_from_int(value.int64()),
-        DataType::Float => decode_datetime_from_float(value.double()),
+        DataType::Text => decode_datetime_from_text(value.text_borrowed()?),
+        DataType::Int4 | DataType::Integer => decode_datetime_from_int(value.int64()?),
+        DataType::Float => decode_datetime_from_float(value.double()?),
 
         _ => None,
     };
@@ -118,7 +118,7 @@ fn decode_datetime(value: SqliteValueRef<'_>) -> Result<DateTime<FixedOffset>, B
     if let Some(dt) = dt {
         Ok(dt)
     } else {
-        Err(format!("invalid datetime: {}", value.text()?).into())
+        Err(format!("invalid datetime: {}", value.text_borrowed()?).into())
     }
 }
 
@@ -191,13 +191,13 @@ impl<'r> Decode<'r, Sqlite> for NaiveDateTime {
 
 impl<'r> Decode<'r, Sqlite> for NaiveDate {
     fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
-        Ok(NaiveDate::parse_from_str(value.text()?, "%F")?)
+        Ok(NaiveDate::parse_from_str(value.text_borrowed()?, "%F")?)
     }
 }
 
 impl<'r> Decode<'r, Sqlite> for NaiveTime {
     fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
-        let value = value.text()?;
+        let value = value.text_borrowed()?;
 
         // Loop over common time patterns, inspired by Diesel
         // https://github.com/diesel-rs/diesel/blob/93ab183bcb06c69c0aee4a7557b6798fd52dd0d8/diesel/src/sqlite/types/date_and_time/chrono.rs#L29-L47

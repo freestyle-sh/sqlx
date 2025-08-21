@@ -1,4 +1,5 @@
-use crate::{Sqlite, SqliteArgumentValue, SqliteTypeInfo, SqliteValueRef};
+use crate::arguments::SqliteArgumentsBuffer;
+use crate::{Sqlite, SqliteTypeInfo, SqliteValueRef};
 use sqlx_core::decode::Decode;
 use sqlx_core::encode::{Encode, IsNull};
 use sqlx_core::error::BoxDynError;
@@ -16,11 +17,11 @@ impl<T> Type<Sqlite> for Text<T> {
     }
 }
 
-impl<'q, T> Encode<'q, Sqlite> for Text<T>
+impl<T> Encode<'_, Sqlite> for Text<T>
 where
     T: Display,
 {
-    fn encode_by_ref(&self, buf: &mut Vec<SqliteArgumentValue<'q>>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         Encode::<Sqlite>::encode(self.0.to_string(), buf)
     }
 }
@@ -31,7 +32,6 @@ where
     BoxDynError: From<<T as FromStr>::Err>,
 {
     fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
-        let s: &str = Decode::<Sqlite>::decode(value)?;
-        Ok(Self(s.parse()?))
+        Ok(Self(value.with_temp_text(|text| text.parse::<T>())??))
     }
 }

@@ -1,3 +1,4 @@
+use crate::arguments::SqliteArgumentsBuffer;
 use crate::decode::Decode;
 use crate::encode::{Encode, IsNull};
 use crate::error::BoxDynError;
@@ -15,11 +16,8 @@ impl Type<Sqlite> for i8 {
     }
 }
 
-impl<'q> Encode<'q, Sqlite> for i8 {
-    fn encode_by_ref(
-        &self,
-        args: &mut Vec<SqliteArgumentValue<'q>>,
-    ) -> Result<IsNull, BoxDynError> {
+impl Encode<'_, Sqlite> for i8 {
+    fn encode_by_ref(&self, args: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         args.push(SqliteArgumentValue::Int(*self as i32));
 
         Ok(IsNull::No)
@@ -32,7 +30,7 @@ impl<'r> Decode<'r, Sqlite> for i8 {
         // which leads to bugs, e.g.:
         // https://github.com/launchbadge/sqlx/issues/3179
         // Similar bug in Postgres: https://github.com/launchbadge/sqlx/issues/3161
-        Ok(value.int64().try_into()?)
+        Ok(value.int64()?.try_into()?)
     }
 }
 
@@ -46,11 +44,8 @@ impl Type<Sqlite> for i16 {
     }
 }
 
-impl<'q> Encode<'q, Sqlite> for i16 {
-    fn encode_by_ref(
-        &self,
-        args: &mut Vec<SqliteArgumentValue<'q>>,
-    ) -> Result<IsNull, BoxDynError> {
+impl Encode<'_, Sqlite> for i16 {
+    fn encode_by_ref(&self, args: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         args.push(SqliteArgumentValue::Int(*self as i32));
 
         Ok(IsNull::No)
@@ -59,7 +54,7 @@ impl<'q> Encode<'q, Sqlite> for i16 {
 
 impl<'r> Decode<'r, Sqlite> for i16 {
     fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
-        Ok(value.int64().try_into()?)
+        Ok(value.int64()?.try_into()?)
     }
 }
 
@@ -73,11 +68,8 @@ impl Type<Sqlite> for i32 {
     }
 }
 
-impl<'q> Encode<'q, Sqlite> for i32 {
-    fn encode_by_ref(
-        &self,
-        args: &mut Vec<SqliteArgumentValue<'q>>,
-    ) -> Result<IsNull, BoxDynError> {
+impl Encode<'_, Sqlite> for i32 {
+    fn encode_by_ref(&self, args: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         args.push(SqliteArgumentValue::Int(*self));
 
         Ok(IsNull::No)
@@ -86,7 +78,7 @@ impl<'q> Encode<'q, Sqlite> for i32 {
 
 impl<'r> Decode<'r, Sqlite> for i32 {
     fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
-        Ok(value.int64().try_into()?)
+        Ok(value.int64()?.try_into()?)
     }
 }
 
@@ -100,11 +92,8 @@ impl Type<Sqlite> for i64 {
     }
 }
 
-impl<'q> Encode<'q, Sqlite> for i64 {
-    fn encode_by_ref(
-        &self,
-        args: &mut Vec<SqliteArgumentValue<'q>>,
-    ) -> Result<IsNull, BoxDynError> {
+impl Encode<'_, Sqlite> for i64 {
+    fn encode_by_ref(&self, args: &mut SqliteArgumentsBuffer) -> Result<IsNull, BoxDynError> {
         args.push(SqliteArgumentValue::Int64(*self));
 
         Ok(IsNull::No)
@@ -113,6 +102,6 @@ impl<'q> Encode<'q, Sqlite> for i64 {
 
 impl<'r> Decode<'r, Sqlite> for i64 {
     fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
-        Ok(value.int64())
+        Ok(value.int64()?)
     }
 }
