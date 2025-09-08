@@ -3567,6 +3567,7 @@ dependencies = [
  "async-global-executor 3.1.0",
  "async-io",
  "async-std",
+ "async-task",
  "base64 0.22.1",
  "bigdecimal",
  "bit-vec",
