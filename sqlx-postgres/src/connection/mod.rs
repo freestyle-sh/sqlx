@@ -185,6 +185,13 @@ impl Connection for PgConnection {
         self.wait_until_ready().await
     }
 
+    fn is_in_transaction(&self) -> bool {
+        // A cancelled/failed BEGIN can leave server state ahead of driver
+        // bookkeeping. Failed transactions also require cleanup.
+        self.inner.transaction_depth != 0
+            || !matches!(self.inner.transaction_status, TransactionStatus::Idle)
+    }
+
     fn begin(
         &mut self,
     ) -> impl Future<Output = Result<Transaction<'_, Self::Database>, Error>> + Send + '_ {
