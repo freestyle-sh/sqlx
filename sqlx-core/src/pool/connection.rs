@@ -320,6 +320,12 @@ impl<DB: Database> Floating<DB, Live<DB>> {
             // Connection is broken, don't try to gracefully close.
             self.close_hard().await;
             false
+        } else if self.raw.is_in_transaction() {
+            // ping has drained pending responses and any queued rollback. A
+            // transaction still open now has no owner and must not be reused.
+            tracing::warn!("discarding pooled connection with an unresolved transaction");
+            self.close_hard().await;
+            false
         } else {
             // if the connection is still viable, release it to the pool
             self.release();
